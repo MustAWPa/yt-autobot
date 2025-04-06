@@ -1,14 +1,32 @@
 import os
 import csv
 import datetime
+import argparse
 import google_auth_oauthlib.flow
 import googleapiclient.discovery
 from googleapiclient.http import MediaFileUpload
+
 # defining upload scope
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload",
           "https://www.googleapis.com/auth/spreadsheets"]
 
-SPREADSHEET_ID = "1UNVITNb0_3uFqs-hd-HXthkkWGiBobImgtOcsaU2ATQ"
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Batch upload videos with optional Google Sheets logging."
+    )
+    parser.add_argument(
+        "--use-sheets",
+        action="store_true",
+        help="Enable logging to Google Sheets."
+    )
+    parser.add_argument(
+        "--spreadsheet-id",
+        type=str,
+        default="",
+        help="Google Sheets spreadsheet ID. If omitted and --use-sheets is set, a new sheet will be created."
+    )
+    return parser.parse_args()
 
 def authentication():
     client_secret = "client_secret.json"
@@ -20,7 +38,7 @@ def authentication():
     return youtube, sheets
 
 def upload_video (youtube, file_path, title, description, tags, categoryId="22", privacyStatus="private",
-                  scheduled_datetime=None):
+                  scheduled_datetime=None, thumbnail=None):
     request_body = {
         "snippet": {
             "title" : title,
@@ -52,10 +70,54 @@ def upload_video (youtube, file_path, title, description, tags, categoryId="22",
         if status:
             print(f"Upload progress for '{title}': {int(status.progress() * 100)}%")
     print(f"Upload complete for '{title}'. Video ID: {response.get('id')}\n")
-    return response.get("id")
+    video_id = response.get("id")
+    
+    if thumbnail:
+        thumbnail = f"thumbnails/{thumbnail}"
+        if os.path.exists(thumbnail):
+            thumb_media = MediaFileUpload(thumbnail)
+            thumb_request = youtube.thumbnails().set(videoId=video_id, media_body=thumb_media)
+            thumb_request.execute()
+            print(f"Thumbnail set for video '{title}'.")
+        else:
+            print(f"Thumbnail file '{thumbnail}' not found. Skipping thumbnail.")
+    
+    return video_id
+
+def create_spreadsheet(sheets, title="Video Upload Log"):
+    body = {
+        "properties": {
+            "title": title
+        }
+    }
+    spreadsheet = sheets.spreadsheets().create(body=body, fields="spreadsheetId").execute()
+    new_id = spreadsheet.get("spreadsheetId")
+    print(f"Created new spreadsheet with ID: {new_id}")
+    return new_id
+
+def initialize_sheet_headers(sheets, spreadsheet_id):
+
+    header_range = "Sheet1!A1:H1"
+    result = sheets.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=header_range
+    ).execute()
+    values = result.get("values", [])
+    if not values or not values[0]:
+        headers = [["Filename", "Title", "Description", "Video ID", "URL", "Actual Upload Time", "Scheduled Publish", "Tags"]]
+        body = {"values": headers}
+        sheets.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=header_range,
+            valueInputOption="RAW",
+            body=body
+        ).execute()
+        print("Sheet headers set.")
+    else:
+        print("Sheet headers already exist.")
 
 def log_upload(video_data):
-    if os.path.isfile("upload.txt"):
+    if os.path.isfile("upload_log.txt"):
         with open("upload_log.txt", "a") as f:
             line = f"{video_data['filename']}, {video_data['title']}, {video_data['video_id']}, {video_data['url']}, {video_data['actual_upload_time']}, {video_data.get('scheduled_publish', 'Not Scheduled')}\n"
             f.write(line)
@@ -66,7 +128,7 @@ def log_upload(video_data):
             line = f"{video_data['filename']}, {video_data['title']}, {video_data['video_id']}, {video_data['url']}, {video_data['actual_upload_time']}, {video_data.get('scheduled_publish', 'Not Scheduled')}\n"
             f.write(line)
 
-def update_google_sheet(sheets, video_data):
+def update_google_sheet(sheets, video_data, spreadsheet_id):
     row = [
         video_data.get("filename"),
         video_data.get("title"),
@@ -79,7 +141,7 @@ def update_google_sheet(sheets, video_data):
     ]
     body = {"values": [row]}
     sheets.spreadsheets().values().append(
-        spreadsheetId=SPREADSHEET_ID,
+        spreadsheetId=spreadsheet_id,
         range="Sheet1!A:H",
         valueInputOption="RAW",
         body=body
@@ -103,19 +165,32 @@ def video_details(csv_file):
     return details
 
 def main():
+    args = parse_args()
     youtube, sheets = authentication()
     csv_file = "video_details.csv"
-
     video_names = video_details(csv_file)
 
+    spreadsheet_id = None
+    if args.use_sheets:
+        if args.spreadsheet_id:
+            spreadsheet_id = args.spreadsheet_id
+        else:
+            spreadsheet_id = create_spreadsheet(sheets)
+        initialize_sheet_headers(sheets, spreadsheet_id)
+
     incoming_videos = os.listdir("videos")
+
+    if incoming_videos==[]:
+        print("No videos to upload")
+        return
+    
     for video in video_names:
         filename = video.get("filename", incoming_videos.pop())
         num = 1
         title = video.get("title", f"Untitled video {num}")
         description = video.get("description", f"Uploaded video number {num}")
         tags = video.get("tags", [])
-
+        thumbnail = video.get("thumbnail", None)
         upload_date = video.get("upload_date")
         upload_time = video.get("upload_time")
 
@@ -126,17 +201,15 @@ def main():
                 upload_date = datetime.datetime.today().strftime("%Y-%m-%d")
             if not upload_time:
                 upload_time = "00:00"
-            
+          
             scheduled_datetime = datetime.datetime.strptime(f"{upload_date} {upload_time}", "%Y-%m-%d %H:%M")
-            
-
-
+        
         video_id = upload_video(youtube, f"videos/{filename}", title, description, tags,
-                                scheduled_datetime=scheduled_datetime)
+                                scheduled_datetime=scheduled_datetime, thumbnail=thumbnail)
         video_url = f"https://youtu.be/{video_id}"
 
         actual_upload_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        scheduled_publish = (scheduled_datetime.astimezone(datetime.timezone.utc).isoformat()
+        scheduled_publish = (scheduled_datetime.astimezone(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
                              if scheduled_datetime else "Not Scheduled")
 
         video_data = {
@@ -151,7 +224,8 @@ def main():
         }
 
         log_upload(video_data)
-        update_google_sheet(sheets,video_data)
+        if args.use_sheets and spreadsheet_id:
+            update_google_sheet(sheets, video_data, spreadsheet_id)
 
     return
 
