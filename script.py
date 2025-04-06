@@ -45,8 +45,9 @@ def main():
     youtube = authentication()
     os.chdir("videos")
     directory_vids = os.listdir()
+    num = 1
     for video in directory_vids:
-        num = 1
+        
         title = f"Test vid {num}"
         description = "Test video upload for the number {num}"
         tags = ["test", "automation"]
