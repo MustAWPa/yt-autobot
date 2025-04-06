@@ -1,0 +1,4 @@
+filename,title,description,tags,thumbnail,upload_date,upload_time
+sample_video_1.mp4,Test Video 1,"This is the first test video upload for automation.","test,automation",thumb1.jpg,2025-04-08,12:00
+sample_video_2.mp4,Test Video 2,"This is the second test video showcasing dynamic SEO updates.","test,automation",thumb2.jpg,,13:30
+sample_video_3.mp4,Test Video 3,"A demonstration of scheduled uploads and Google Sheets logging.","test,automation",thumb3.jpg,,14:45
