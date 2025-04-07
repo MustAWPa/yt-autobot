@@ -3,7 +3,6 @@ import csv
 import datetime
 import argparse
 import json
-import ast
 from openai import OpenAI
 from dotenv import load_dotenv
 import google_auth_oauthlib.flow
@@ -11,8 +10,8 @@ import googleapiclient.discovery
 from googleapiclient.http import MediaFileUpload
 
 # defining upload scope
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload",
-          "https://www.googleapis.com/auth/spreadsheets"]
+#SCOPES = ["https://www.googleapis.com/auth/youtube.upload",
+#         "https://www.googleapis.com/auth/spreadsheets"]
 
 
 def parse_args():
@@ -25,22 +24,16 @@ def parse_args():
         help="Enable logging to Google Sheets."
     )
     parser.add_argument(
-        "--spreadsheet-id",
-        type=str,
-        default="",
-        help="Google Sheets spreadsheet ID. If omitted and --use-sheets is set, a new sheet will be created."
-    )
-    parser.add_argument(
         "--ai-seo",
         action="store_true",
         help="Enable AI-powered SEO optimization for title, description, and tags."
     )
     return parser.parse_args()
 
-def authentication():
+def authentication(scopes):
     client_secret = "client_secret.json"
     flow = google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file(
-        client_secret, SCOPES)
+        client_secret, scopes)
     creds = flow.run_local_server(port=8080, prompt='consent')
     youtube = googleapiclient.discovery.build("youtube", "v3", credentials=creds)
     sheets = googleapiclient.discovery.build("sheets", "v4", credentials=creds)
@@ -153,6 +146,7 @@ def generate_ai_seo_metadata(original_title, original_description, original_tags
     return new_title, new_description, new_tags
 
 def log_upload(video_data):
+    os.chdir("..")
     if os.path.isfile("upload_log.txt"):
         with open("upload_log.txt", "a") as f:
             line = f"{video_data['filename']}, {video_data['title']}, {video_data['video_id']}, {video_data['url']}, {video_data['actual_upload_time']}, {video_data.get('scheduled_publish', 'Not Scheduled')}\n"
@@ -163,7 +157,8 @@ def log_upload(video_data):
             f.write(header)
             line = f"{video_data['filename']}, {video_data['title']}, {video_data['video_id']}, {video_data['url']}, {video_data['actual_upload_time']}, {video_data.get('scheduled_publish', 'Not Scheduled')}\n"
             f.write(line)
-
+    os.chdir("videos")
+    
 def update_google_sheet(sheets, video_data, spreadsheet_id):
     row = [
         video_data.get("filename"),
@@ -189,70 +184,95 @@ def video_details(csv_file):
     Reads video details from the csv file
     Expected headers: filename, title, description, tags, thumbnail, upload_date, upload_time
     '''
-    details = []
-    with open(csv_file, newline='', encoding='utf-8') as file:
-        reader = csv.DictReader(file)
-        for row in reader:
-            if "tags" in row and row["tags"]:
-                row["tags"] = [tag.strip() for tag in row["tags"].split(',')]
-            else:
-                row["tags"] = []
-            details.append(row)
+    details = {}
+    if os.path.exists(csv_file):
+        with open(csv_file, newline='', encoding='utf-8') as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                key = row.get("filename")
+                if key:
+                    if "tags" in row and row["tags"]:
+                        row["tags"] = [tag.strip() for tag in row["tags"].split(',')]
+                    else:
+                        row["tags"] = []
+                    details[key] = row
     return details
 
 def main():
     load_dotenv()
     args = parse_args()
-    youtube, sheets = authentication()
-    csv_file = "video_details.csv"
-    video_names = video_details(csv_file)
 
+    scopes = ["https://www.googleapis.com/auth/youtube.upload"]
+    if args.use_sheets:
+        scopes.append("https://www.googleapis.com/auth/spreadsheets")
+    
+    youtube, sheets = authentication(scopes)
+    
+    csv_file = "video_details.csv"
+    csv_mapping = video_details(csv_file)
+    
     spreadsheet_id = None
     if args.use_sheets:
-        if args.spreadsheet_id:
-            spreadsheet_id = args.spreadsheet_id
+        if os.environ.get("SPREADSHEET_ID"):
+            spreadsheet_id = os.environ.get("SPREADSHEET_ID")
         else:
             spreadsheet_id = create_spreadsheet(sheets)
         initialize_sheet_headers(sheets, spreadsheet_id)
-
-    incoming_videos = os.listdir("videos")
-
-    if incoming_videos==[]:
+    
+    videos_folder = "videos"
+    if not os.path.isdir(videos_folder):
+        print("Videos folder not found. Exiting.")
+        return
+    os.chdir(videos_folder)
+    
+    incoming_videos = os.listdir(".")
+    if not incoming_videos:
         print("No videos to upload")
         return
-    
-    for video in video_names:
+
+    for filename in incoming_videos:
         try:
-            filename = video.get("filename", incoming_videos.pop())
-            num = 1
-            title = video.get("title", f"Untitled video {num}")
-            description = video.get("description", f"Uploaded video number {num}")
-            tags = video.get("tags", [])
-            thumbnail = video.get("thumbnail", None)
-            upload_date = video.get("upload_date")
-            upload_time = video.get("upload_time")
+            if not filename.lower().endswith((".mp4", ".mov", ".avi", ".mkv")):
+                continue
+            
+            video_path = filename
+            if not os.path.exists(video_path):
+                print(f"File '{filename}' does not exist. Skipping.")
+                continue
+
+            if filename in csv_mapping:
+                metadata = csv_mapping[filename]
+                title = metadata.get("title", f"Untitled video {filename}")
+                description = metadata.get("description", f"Uploaded video {filename}")
+                tags = metadata.get("tags", [])
+                thumbnail = metadata.get("thumbnail", None)
+                upload_date = metadata.get("upload_date", None)
+                upload_time = metadata.get("upload_time", None)
+            else:
+                title = os.path.splitext(filename)[0]
+                description = f"Video {filename} uploaded automatically."
+                tags = []
+                thumbnail = None
+                upload_date = None
+                upload_time = None
 
             scheduled_datetime = None
-
             if upload_date or upload_time:
                 if not upload_date:
                     upload_date = datetime.datetime.today().strftime("%Y-%m-%d")
                 if not upload_time:
                     upload_time = "00:00"
-            
                 scheduled_datetime = datetime.datetime.strptime(f"{upload_date} {upload_time}", "%Y-%m-%d %H:%M")
-            
-            if args.ai_seo:
-                    title, description, tags = generate_ai_seo_metadata(title, description, tags)
 
-            
-            video_id = upload_video(youtube, f"videos/{filename}", title, description, tags,
+            if args.ai_seo:
+                title, description, tags = generate_ai_seo_metadata(title, description, tags)
+
+            video_id = upload_video(youtube, video_path, title, description, tags,
                                     scheduled_datetime=scheduled_datetime, thumbnail=thumbnail)
             video_url = f"https://youtu.be/{video_id}"
-
             actual_upload_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             scheduled_publish = (scheduled_datetime.astimezone(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-                                if scheduled_datetime else "Not Scheduled")
+                                 if scheduled_datetime else "Not Scheduled")
 
             video_data = {
                 "filename": filename,
@@ -268,12 +288,11 @@ def main():
             log_upload(video_data)
             if args.use_sheets and spreadsheet_id:
                 update_google_sheet(sheets, video_data, spreadsheet_id)
-        
         except Exception as e:
-            print(f"Error processing video '{video.get('filename', 'Unknown')}': {e}. Skipping and continuing.")
+            print(f"Error processing video '{filename}': {e}. Skipping and continuing.")
             continue
 
-    return
+    print("Batch upload complete.")
 
 if __name__ == "__main__":
     main()
