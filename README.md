@@ -28,6 +28,8 @@ This python tool automates the upload of mutiple video files from a local folder
    ```bash
    python script.py
 
+## Bonus features
+
 3. **Log to Google Sheets**
    To log video details to Google sheets, set your spreadsheet ID in the environment file otherwise a sheet will be created for you.
    ```bash
