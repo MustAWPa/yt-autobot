@@ -2,6 +2,10 @@ import os
 import csv
 import datetime
 import argparse
+import json
+import ast
+from openai import OpenAI
+from dotenv import load_dotenv
 import google_auth_oauthlib.flow
 import googleapiclient.discovery
 from googleapiclient.http import MediaFileUpload
@@ -25,6 +29,11 @@ def parse_args():
         type=str,
         default="",
         help="Google Sheets spreadsheet ID. If omitted and --use-sheets is set, a new sheet will be created."
+    )
+    parser.add_argument(
+        "--ai-seo",
+        action="store_true",
+        help="Enable AI-powered SEO optimization for title, description, and tags."
     )
     return parser.parse_args()
 
@@ -116,6 +125,33 @@ def initialize_sheet_headers(sheets, spreadsheet_id):
     else:
         print("Sheet headers already exist.")
 
+def generate_ai_seo_metadata(original_title, original_description, original_tags):
+    try:
+        client = OpenAI(
+        api_key=os.environ.get("OPENAI_API_KEY"),
+        )   
+
+        response = client.responses.create(
+            model="gpt-4o",
+            instructions="You are an SEO expert. Generate completely new SEO-optimized metadata for a YouTube video",
+            input=f"""Generate a new title, a new description, and additional tags to boost SEO. Title: {original_title}. 
+            Description: {original_description}. Tags: {original_tags}. Generate a new title, a new description, and additional tags to boost SEO.
+            Return the result as a JSON object with keys title, description, and tags (tags as a list)."""
+        )
+               
+        clean_response = response.output_text.replace("```json", "").replace("```", "").strip()
+        result = json.loads(clean_response)
+        print("running")
+        new_title = result.get("title", original_title)
+        new_description = result.get("description", original_description)
+        new_tags = result.get("tags", original_tags)
+    
+    except Exception as e:
+        print(f"Error in AI SEO generation: {e}")
+        return original_title, original_description, original_tags
+    
+    return new_title, new_description, new_tags
+
 def log_upload(video_data):
     if os.path.isfile("upload_log.txt"):
         with open("upload_log.txt", "a") as f:
@@ -165,6 +201,7 @@ def video_details(csv_file):
     return details
 
 def main():
+    load_dotenv()
     args = parse_args()
     youtube, sheets = authentication()
     csv_file = "video_details.csv"
@@ -185,47 +222,56 @@ def main():
         return
     
     for video in video_names:
-        filename = video.get("filename", incoming_videos.pop())
-        num = 1
-        title = video.get("title", f"Untitled video {num}")
-        description = video.get("description", f"Uploaded video number {num}")
-        tags = video.get("tags", [])
-        thumbnail = video.get("thumbnail", None)
-        upload_date = video.get("upload_date")
-        upload_time = video.get("upload_time")
+        try:
+            filename = video.get("filename", incoming_videos.pop())
+            num = 1
+            title = video.get("title", f"Untitled video {num}")
+            description = video.get("description", f"Uploaded video number {num}")
+            tags = video.get("tags", [])
+            thumbnail = video.get("thumbnail", None)
+            upload_date = video.get("upload_date")
+            upload_time = video.get("upload_time")
 
-        scheduled_datetime = None
+            scheduled_datetime = None
 
-        if upload_date or upload_time:
-            if not upload_date:
-                upload_date = datetime.datetime.today().strftime("%Y-%m-%d")
-            if not upload_time:
-                upload_time = "00:00"
-          
-            scheduled_datetime = datetime.datetime.strptime(f"{upload_date} {upload_time}", "%Y-%m-%d %H:%M")
+            if upload_date or upload_time:
+                if not upload_date:
+                    upload_date = datetime.datetime.today().strftime("%Y-%m-%d")
+                if not upload_time:
+                    upload_time = "00:00"
+            
+                scheduled_datetime = datetime.datetime.strptime(f"{upload_date} {upload_time}", "%Y-%m-%d %H:%M")
+            
+            if args.ai_seo:
+                    title, description, tags = generate_ai_seo_metadata(title, description, tags)
+
+            
+            video_id = upload_video(youtube, f"videos/{filename}", title, description, tags,
+                                    scheduled_datetime=scheduled_datetime, thumbnail=thumbnail)
+            video_url = f"https://youtu.be/{video_id}"
+
+            actual_upload_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            scheduled_publish = (scheduled_datetime.astimezone(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                                if scheduled_datetime else "Not Scheduled")
+
+            video_data = {
+                "filename": filename,
+                "title": title,
+                "description": description,
+                "video_id": video_id,
+                "url": video_url,
+                "actual_upload_time": actual_upload_time,
+                "scheduled_publish": scheduled_publish,
+                "tags": tags
+            }
+
+            log_upload(video_data)
+            if args.use_sheets and spreadsheet_id:
+                update_google_sheet(sheets, video_data, spreadsheet_id)
         
-        video_id = upload_video(youtube, f"videos/{filename}", title, description, tags,
-                                scheduled_datetime=scheduled_datetime, thumbnail=thumbnail)
-        video_url = f"https://youtu.be/{video_id}"
-
-        actual_upload_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        scheduled_publish = (scheduled_datetime.astimezone(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-                             if scheduled_datetime else "Not Scheduled")
-
-        video_data = {
-            "filename": filename,
-            "title": title,
-            "description": description,
-            "video_id": video_id,
-            "url": video_url,
-            "actual_upload_time": actual_upload_time,
-            "scheduled_publish": scheduled_publish,
-            "tags": tags
-        }
-
-        log_upload(video_data)
-        if args.use_sheets and spreadsheet_id:
-            update_google_sheet(sheets, video_data, spreadsheet_id)
+        except Exception as e:
+            print(f"Error processing video '{video.get('filename', 'Unknown')}': {e}. Skipping and continuing.")
+            continue
 
     return
 
