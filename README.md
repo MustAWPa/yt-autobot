@@ -43,7 +43,9 @@ This python tool automates the upload of mutiple video files from a local folder
 
 - **Python 3.7+**
 - **pip** (Python package installer)
-- **Google Cloud Project:**  
+- **Google Cloud Project:**
+  - Since the script is in the testing stage, a project should be initialized.
+  - Add yourself as a test user.
   - Enable the [YouTube Data API v3](https://console.developers.google.com/apis/library/youtube.googleapis.com)
   - Enable the [Google Sheets API](https://console.developers.google.com/apis/library/sheets.googleapis.com)
   - Download the OAuth 2.0 client credentials as `client_secret.json` and place it in the project root.
