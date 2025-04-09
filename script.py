@@ -73,7 +73,8 @@ def upload_video (youtube, file_path, title, description, tags, categoryId="22",
             print(f"Upload progress for '{title}': {int(status.progress() * 100)}%")
     print(f"Upload complete for '{title}'. Video ID: {response.get('id')}\n")
     video_id = response.get("id")
-    
+
+    os.chdir("..")
     if thumbnail:
         thumbnail = f"thumbnails/{thumbnail}"
         if os.path.exists(thumbnail):
@@ -83,7 +84,7 @@ def upload_video (youtube, file_path, title, description, tags, categoryId="22",
             print(f"Thumbnail set for video '{title}'.")
         else:
             print(f"Thumbnail file '{thumbnail}' not found. Skipping thumbnail.")
-    
+    os.chdir("videos")
     return video_id
 
 def create_spreadsheet(sheets, title="Video Upload Log"):
