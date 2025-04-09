@@ -13,7 +13,23 @@ This python tool automates the upload of mutiple video files from a local folder
   Upload details are logged to a local text file. When enabled with the `--use-sheets` flag, the tool logs details to a Google Sheets spreadsheet. The spreadsheet ID is taken from the `SPREADSHEET_ID` environment variable if set; otherwise, a new spreadsheet is created automatically.
 - **Dynamic SEO Optimization:**  
   When enabled with the `--ai-seo` flag, the tool uses OpenAI's API to completely generate new SEO-optimized metadata (title, description, and tags) for each video. An OpenAPI key environment variable is required to use this feature.
+## Prerequisites
 
+- **Python 3.7+**
+- **pip** (Python package installer)
+- **Google Cloud Project:**
+  - Since the script is in the testing stage, a project should be initialized.
+  - Add yourself as a test user.
+  - Enable the [YouTube Data API v3](https://console.developers.google.com/apis/library/youtube.googleapis.com)
+  - Enable the [Google Sheets API](https://console.developers.google.com/apis/library/sheets.googleapis.com)
+  - Download the OAuth 2.0 client credentials as `client_secret.json` and place it in the project root.
+- **OpenAI API Key:**  
+  For AI-powered SEO optimization, set your API key in an environment variable (`OPENAI_API_KEY`).
+- **Directory Structure:**  
+  - A folder called `videos` containing your video files.
+  - Optionally, a folder called `thumbnails` containing thumbnail images.
+  - Optionally, a CSV file named `video_details.csv` with the following headers:  
+    `filename,title,description,tags,thumbnail,upload_date,upload_time`
 ## Installation
 
 1. **Clone the Repository:**
@@ -39,20 +55,4 @@ This python tool automates the upload of mutiple video files from a local folder
    To enable AI-powered SEO optimization (requires an OpenAI API key set in your environment)
    ```bash
    python script.py --ai-seo
-  ## Prerequisites
-
-- **Python 3.7+**
-- **pip** (Python package installer)
-- **Google Cloud Project:**
-  - Since the script is in the testing stage, a project should be initialized.
-  - Add yourself as a test user.
-  - Enable the [YouTube Data API v3](https://console.developers.google.com/apis/library/youtube.googleapis.com)
-  - Enable the [Google Sheets API](https://console.developers.google.com/apis/library/sheets.googleapis.com)
-  - Download the OAuth 2.0 client credentials as `client_secret.json` and place it in the project root.
-- **OpenAI API Key:**  
-  For AI-powered SEO optimization, set your API key in an environment variable (`OPENAI_API_KEY`).
-- **Directory Structure:**  
-  - A folder called `videos` containing your video files.
-  - Optionally, a folder called `thumbnails` containing thumbnail images.
-  - Optionally, a CSV file named `video_details.csv` with the following headers:  
-    `filename,title,description,tags,thumbnail,upload_date,upload_time`
+  
